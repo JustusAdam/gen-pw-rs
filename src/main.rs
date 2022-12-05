@@ -55,7 +55,10 @@ const UPPER_CASE_LETTERS: Range<char> = 'A'..'Z';
 const NUMBERS: Range<char> = '0'..'9';
 const SYMBOLS: &'static str = "-_/[]{}()*&^%$#@.!?=+:;|~";
 
+/// Generate strong passwords by sampling words form an aspell dictionary or
+/// just letters.
 #[derive(Parser)]
+#[clap(author, version, about)]
 struct Opts {
     /// Minimal length of the password
     #[clap(long, env, default_value = "10")]

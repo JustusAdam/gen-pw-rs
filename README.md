@@ -16,10 +16,10 @@ is:
 
 Include at least one
 
-- `Number`: i.e. character in `0-9`
-- `Symbol`: the list of allowed symbol is configurable with `--symbols`
-- `LowerCaseLetter`
-- `UpperCaseLetter`
+- `number`: i.e. character in `0-9`
+- `symbol`: the list of allowed symbol is configurable with `--symbols`
+- `lower-case-letter`
+- `upper-case-letter`
 
 If none of the options are specified all constraints are enabled.
 
