@@ -1,6 +1,9 @@
 extern crate clap;
 extern crate either;
 extern crate rand;
+#[macro_use]
+extern crate log;
+extern crate simple_logger;
 
 use std::{ops::Range, process::Stdio, str::FromStr};
 
@@ -31,14 +34,12 @@ enum Constraint {
 
 impl Constraint {
     fn verify(self, opts: &Opts, s: &str) -> bool {
-        s.chars().any(|c|
-            match self {
-                Constraint::LowerCaseLetter => LOWER_CASE_LETTERS.contains(&c),
-                Constraint::UpperCaseLetter => UPPER_CASE_LETTERS.contains(&c),
-                Constraint::Number => NUMBERS.contains(&c),
-                Constraint::Symbol => opts.symbols.contains(c),
-            }
-        )
+        s.chars().any(|c| match self {
+            Constraint::LowerCaseLetter => LOWER_CASE_LETTERS.contains(&c),
+            Constraint::UpperCaseLetter => UPPER_CASE_LETTERS.contains(&c),
+            Constraint::Number => NUMBERS.contains(&c),
+            Constraint::Symbol => opts.symbols.contains(c),
+        })
     }
 }
 
@@ -73,6 +74,8 @@ struct Opts {
     symbols: String,
     #[clap(long, env, default_value = "1000")]
     tries: usize,
+    #[clap(long, env)]
+    debug: bool,
     #[clap(subcommand)]
     command: Command,
 }
@@ -105,16 +108,38 @@ fn do_gen<F: Fn(&mut String, &mut rand::rngs::ThreadRng, bool) -> Option<()>>(
                 ),
             }
         }
-        (s.len() < opts.max
-        && !required.iter().any(|c| !c.verify(opts, &s))).then_some(s)
+        let judgement = s.len() < opts.max && !required.iter().any(|c| !c.verify(opts, &s));
+        if !judgement {
+            debug!(
+                "Rejecting {s}: {} {:?} {} and {:?}",
+                s.len(),
+                s.len().cmp(&opts.max),
+                opts.max,
+                required
+                    .iter()
+                    .map(|c| (c, c.verify(opts, &s)))
+                    .collect::<Vec<_>>()
+            );
+        }
+        judgement.then_some(s)
     })
     .take(opts.tries)
     .find_map(|s| s)
-    .expect(&format!("Could not find a satisfactory string in {} tries", opts.tries))
+    .expect(&format!(
+        "Could not find a satisfactory string in {} tries",
+        opts.tries
+    ))
 }
 
 fn main() {
     let ref opts = Opts::parse();
+
+    let mut logger = simple_logger::SimpleLogger::default();
+    if opts.debug {
+        logger = logger.with_level(log::LevelFilter::Debug);
+    }
+    logger.init().unwrap();
+
     let ref required = if opts.require.is_empty() {
         Either::Left(Constraint::value_variants().iter())
     } else {
@@ -165,10 +190,9 @@ fn main() {
                 .any(|w| w.len() >= opts.min && w.len() <= opts.max));
 
             do_gen(opts, &required, |s, rng, is_lowercase| {
-                let word = 
-                    *std::iter::from_fn(|| words.choose(rng))
-                        .filter(|w| w.len() + s.len() <= opts.max)
-                        .next()?;
+                let word = *std::iter::from_fn(|| words.choose(rng))
+                    .filter(|w| w.len() + s.len() <= opts.max)
+                    .next()?;
                 let mut chars = word.chars();
                 let first = chars.next().unwrap();
 
@@ -177,7 +201,9 @@ fn main() {
                         Either::Left(first.to_lowercase())
                     } else {
                         Either::Right(first.to_uppercase())
-                    }.into_iter().chain(chars)
+                    }
+                    .into_iter()
+                    .chain(chars),
                 );
                 Some(())
             })
