@@ -61,23 +61,23 @@ const SYMBOLS: &'static str = "-_/[]{}()*&^%$#@.!?=+:;|~";
 #[clap(author, version, about)]
 struct Opts {
     /// Minimal length of the password
-    #[clap(long, env, default_value = "10")]
+    #[clap(long, default_value = "10")]
     min: usize,
     /// Maximal length of the password
-    #[clap(long, env, default_value = "20")]
+    #[clap(long, default_value = "20")]
     max: usize,
     /// Require this constraint be fulfilled, if left empty all constraints are required.
-    #[clap(long, env)]
+    #[clap(long)]
     require: Vec<Constraint>,
     /// Exclude this constraint. Overwrites both default and elements in `require`
-    #[clap(long, env)]
+    #[clap(long)]
     exclude: Vec<Constraint>,
     /// Characters to use as the valid symbols
-    #[clap(long, env, default_value = SYMBOLS)]
+    #[clap(long, default_value = SYMBOLS)]
     symbols: String,
-    #[clap(long, env, default_value = "1000")]
+    #[clap(long, default_value = "1000")]
     tries: usize,
-    #[clap(long, env)]
+    #[clap(long)]
     debug: bool,
     #[clap(subcommand)]
     command: Command,
@@ -87,7 +87,7 @@ fn do_gen<F: Fn(&mut String, &mut rand::rngs::ThreadRng, bool) -> Option<()>>(
     opts: &Opts,
     required: &[Constraint],
     pick_letters: F,
-) -> String {
+) -> (String, u32) {
     let ref mut rng = rand::thread_rng();
     std::iter::repeat_with(|| {
         let mut s = String::new();
@@ -111,7 +111,7 @@ fn do_gen<F: Fn(&mut String, &mut rand::rngs::ThreadRng, bool) -> Option<()>>(
                 ),
             }
         }
-        let judgement = s.len() < opts.max && !required.iter().any(|c| !c.verify(opts, &s));
+        let judgement = s.len() <= opts.max && !required.iter().any(|c| !c.verify(opts, &s));
         if !judgement {
             debug!(
                 "Rejecting {s}: {} {:?} {} and {:?}",
@@ -127,7 +127,13 @@ fn do_gen<F: Fn(&mut String, &mut rand::rngs::ThreadRng, bool) -> Option<()>>(
         judgement.then_some(s)
     })
     .take(opts.tries)
-    .find_map(|s| s)
+    .find_map({
+        let mut actual_tries = 0;
+        move |s| {
+            actual_tries += 1;
+            s.map(|s| (s, actual_tries))
+        }
+    })
     .expect(&format!(
         "Could not find a satisfactory string in {} tries",
         opts.tries
@@ -137,10 +143,11 @@ fn do_gen<F: Fn(&mut String, &mut rand::rngs::ThreadRng, bool) -> Option<()>>(
 fn main() {
     let ref opts = Opts::parse();
 
-    let mut logger = simple_logger::SimpleLogger::default();
+    let mut logger = simple_logger::SimpleLogger::default().with_level(log::LevelFilter::Info);
     if opts.debug {
+        info!("Running with debug");
         logger = logger.with_level(log::LevelFilter::Debug);
-    }
+    } 
     logger.init().unwrap();
 
     let ref required = if opts.require.is_empty() {
@@ -156,7 +163,7 @@ fn main() {
     assert!(opts.min <= opts.max);
     assert!(opts.min > required.len());
 
-    let result = match &opts.command {
+    let (result, tries) = match &opts.command {
         Command::Chars => do_gen(opts, required, |s, rng, is_lowercase| {
             s.push(
                 <std::ops::Range<char> as rand::seq::IteratorRandom>::choose(
@@ -185,12 +192,14 @@ fn main() {
             let s = String::from_utf8(expanded.stdout).unwrap();
             let words = s
                 .split(char::is_whitespace)
-                .filter(|s| !s.contains('\''))
+                .filter(|s| !s.contains('\'') && !s.is_empty() && !s.len() > opts.max)
                 .collect::<Vec<_>>();
 
             assert!(words
                 .iter()
                 .any(|w| w.len() >= opts.min && w.len() <= opts.max));
+
+            assert!(words.len() > 0);
 
             do_gen(opts, &required, |s, rng, is_lowercase| {
                 let word = *std::iter::from_fn(|| words.choose(rng))
@@ -212,5 +221,6 @@ fn main() {
             })
         }
     };
+    info!("Needed {tries} tries");
     println!("{result}");
 }
