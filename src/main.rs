@@ -10,7 +10,7 @@ use std::{ops::Range, process::Stdio, str::FromStr};
 use clap::{Parser, Subcommand, ValueEnum};
 use either::Either;
 
-use rand::seq::SliceRandom;
+use rand::{prelude::Distribution, seq::SliceRandom};
 
 #[derive(Subcommand)]
 enum Command {
@@ -30,6 +30,18 @@ enum Constraint {
     UpperCaseLetter,
     Number,
     Symbol,
+}
+
+impl Command {
+    fn weights(&self, constraint: Constraint) -> u8 {
+        match self {
+            Command::Chars => 1,
+            Command::Dict { .. } => match constraint {
+                Constraint::LowerCaseLetter | Constraint::UpperCaseLetter => 2,
+                Constraint::Number | Constraint::Symbol => 1,
+            },
+        }
+    }
 }
 
 impl Constraint {
@@ -77,6 +89,8 @@ struct Opts {
     symbols: String,
     #[clap(long, default_value = "1000")]
     tries: usize,
+    #[clap(long, short = 'v')]
+    verbose: bool,
     #[clap(long)]
     debug: bool,
     #[clap(subcommand)]
@@ -89,10 +103,15 @@ fn do_gen<F: Fn(&mut String, &mut rand::rngs::ThreadRng, bool) -> Option<()>>(
     pick_letters: F,
 ) -> (String, u32) {
     let ref mut rng = rand::thread_rng();
+    let weights = required
+        .iter()
+        .copied()
+        .map(|constraint| opts.command.weights(constraint));
+    let dist = rand::distributions::WeightedIndex::new(weights).unwrap();
     std::iter::repeat_with(|| {
         let mut s = String::new();
         while s.len() < opts.min {
-            match required.choose(rng).unwrap() {
+            match required[dist.sample(rng)] {
                 Constraint::LowerCaseLetter => pick_letters(&mut s, rng, true)?,
                 Constraint::UpperCaseLetter => pick_letters(&mut s, rng, false)?,
                 Constraint::Symbol => s.push(
@@ -143,12 +162,19 @@ fn do_gen<F: Fn(&mut String, &mut rand::rngs::ThreadRng, bool) -> Option<()>>(
 fn main() {
     let ref opts = Opts::parse();
 
-    let mut logger = simple_logger::SimpleLogger::default().with_level(log::LevelFilter::Info);
+    simple_logger::SimpleLogger::default().with_level(
+        if opts.debug {
+            log::LevelFilter::Debug
+        } else if opts.verbose {
+            log::LevelFilter::Info
+        } else {
+            log::LevelFilter::Warn
+        })
+        .init()
+        .unwrap();
     if opts.debug {
         info!("Running with debug");
-        logger = logger.with_level(log::LevelFilter::Debug);
-    } 
-    logger.init().unwrap();
+    }
 
     let ref required = if opts.require.is_empty() {
         Either::Left(Constraint::value_variants().iter())
