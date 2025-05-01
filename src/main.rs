@@ -73,25 +73,25 @@ const SYMBOLS: &'static str = "-_/[]{}()*&^%$#@.!?=+:;|~";
 #[clap(author, version, about)]
 struct Opts {
     /// Minimal length of the password
-    #[clap(long, default_value = "10")]
+    #[clap(long, default_value = "10", global = true)]
     min: usize,
     /// Maximal length of the password
-    #[clap(long, default_value = "20")]
+    #[clap(long, default_value = "20", global = true)]
     max: usize,
     /// Require this constraint be fulfilled, if left empty all constraints are required.
-    #[clap(long)]
+    #[clap(long, global = true)]
     require: Vec<Constraint>,
     /// Exclude this constraint. Overwrites both default and elements in `require`
-    #[clap(long)]
+    #[clap(long, global = true)]
     exclude: Vec<Constraint>,
     /// Characters to use as the valid symbols
-    #[clap(long, default_value = SYMBOLS)]
+    #[clap(long, default_value = SYMBOLS, global = true)]
     symbols: String,
-    #[clap(long, default_value = "1000")]
+    #[clap(long, default_value = "1000", global = true)]
     tries: usize,
-    #[clap(long, short = 'v')]
+    #[clap(long, short = 'v', global = true)]
     verbose: bool,
-    #[clap(long)]
+    #[clap(long, global = true)]
     debug: bool,
     #[clap(subcommand)]
     command: Command,
@@ -162,8 +162,8 @@ fn do_gen<F: Fn(&mut String, &mut rand::rngs::ThreadRng, bool) -> Option<()>>(
 fn main() {
     let ref opts = Opts::parse();
 
-    simple_logger::SimpleLogger::default().with_level(
-        if opts.debug {
+    simple_logger::SimpleLogger::default()
+        .with_level(if opts.debug {
             log::LevelFilter::Debug
         } else if opts.verbose {
             log::LevelFilter::Info
@@ -221,24 +221,28 @@ fn main() {
                 .filter(|s| !s.contains('\'') && !s.is_empty() && !s.len() > opts.max)
                 .collect::<Vec<_>>();
 
-            assert!(words
-                .iter()
-                .any(|w| w.len() >= opts.min && w.len() <= opts.max));
+            assert!(words.iter().any(|w| w.len() <= opts.max));
 
             assert!(words.len() > 0);
 
-            do_gen(opts, &required, |s, rng, is_lowercase| {
+            do_gen(opts, &required, |s, rng, needs_lowercase| {
                 let word = *std::iter::from_fn(|| words.choose(rng))
                     .filter(|w| w.len() + s.len() <= opts.max)
                     .next()?;
                 let mut chars = word.chars();
                 let first = chars.next().unwrap();
 
+                if needs_lowercase && word.chars().all(|c| c.is_uppercase()) {
+                    return Some(());
+                }
+
+                let last_is_lower = s.chars().rev().next().map_or(false, |c| c.is_lowercase());
+
                 s.extend(
-                    if is_lowercase {
-                        Either::Left(first.to_lowercase())
+                    if last_is_lower && first.is_lowercase() {
+                        Either::Left(first.to_uppercase())
                     } else {
-                        Either::Right(first.to_uppercase())
+                        Either::Right([first])
                     }
                     .into_iter()
                     .chain(chars),
